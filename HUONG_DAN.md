@@ -71,6 +71,8 @@ Sheet **"Chỉ số cần lọc"** có sẵn 13 chỉ số mẫu; sửa/xóa/th�
 | `Request too large ... tokens per minute` (HTTP 413) | Cắt còn 35% rồi gọi lại |
 | `does not exist or you do not have access` (HTTP 404) | Chuyển sang model dự phòng |
 | `stop_reason: max_tokens` / `finish_reason: length` | Nới hạn mức đầu ra gấp đôi, gọi lại một lần |
+| Claude 5 bật sẵn suy luận mở rộng (token suy nghĩ ăn chung `max_tokens`) | Tắt phần suy nghĩ: thử `thinking: between_tools` → `disabled` → bỏ hẳn, ghi nhớ cách dùng được cho từng model; kèm `output_config.effort = low` |
+| `output_config` / `effort` không được chấp nhận | Bỏ tham số đó, gọi lại chính model |
 | `Insufficient credits` (402), key sai (401/403), hết hạn mức ngày (429) | Bỏ qua model dự phòng, đổi nhà cung cấp |
 
 

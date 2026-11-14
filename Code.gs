@@ -1005,6 +1005,26 @@ function askAI_(chain, g, doc, deadline, ctx) {
 }
 
 /** Dựng request cho đúng loại API. jsonMode: 'schema' (ép schema) | 'object' (chỉ ép JSON). */
+/** Các mức tắt dần phần "suy nghĩ" của Claude, thử lần lượt cho tới khi model chịu nhận. */
+const THINK_CHAIN = ['between_tools', 'disabled', 'none'];
+
+/**
+ * Thân yêu cầu gửi Anthropic.
+ *
+ * Dòng Claude 5 BẬT SẴN suy luận mở rộng, và token suy nghĩ ĐẾM CHUNG vào max_tokens:
+ * model nghĩ hết hạn mức rồi mới viết, nên kết quả bị cắt (stop_reason: max_tokens)
+ * dù hạn mức đã nhân đôi. Bóc số liệu từ báo cáo không cần suy luận dài, nên ta tắt đi.
+ * Mỗi đời model nhận một cách khác nhau (Sonnet 5.5 chỉ nhận 'between_tools',
+ * Haiku 5.5 nhận 'disabled', đời cũ không nhận gì), nên askModel_ thử lần lượt theo
+ * THINK_CHAIN rồi ghi nhớ cách dùng được cho từng model.
+ */
+function anthropicBody_(model, g, content, opt) {
+  const body = { model: model, max_tokens: g.maxTokens, system: SYS_INSTRUCTION, messages: [{ role: 'user', content: content }] };
+  if (opt.think && opt.think !== 'none') body.thinking = { type: opt.think };
+  if (!opt.noEffort) body.output_config = { effort: 'low' };
+  return body;
+}
+
 /**
  * noTemp: bỏ hẳn tham số temperature.
  * Các model có suy luận mở rộng bật sẵn (dòng Claude 5, một số model reasoning của
@@ -1012,7 +1032,9 @@ function askAI_(chain, g, doc, deadline, ctx) {
  * "`temperature` may only be set to 1 when thinking is enabled". Với Claude ta bỏ luôn;
  * các bên khác nếu báo lỗi về temperature thì askModel_ tự bỏ rồi gọi lại.
  */
-function buildRequest_(pc, model, g, doc, jsonMode, noTemp) {
+function buildRequest_(pc, model, g, doc, jsonMode, opt) {
+  opt = opt || {};
+  const noTemp = opt.noTemp;
   const docText = doc && doc.kind === 'text' ? '\n--- NỘI DUNG BÁO CÁO (chữ bóc từ PDF, bảng biểu đã bị ép thành dòng) ---\n' + doc.text : '';
   const schemaStd = toJsonSchema_(g.schema);
 
@@ -1021,7 +1043,7 @@ function buildRequest_(pc, model, g, doc, jsonMode, noTemp) {
     if (doc && doc.kind === 'pdf') content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: doc.b64 } });
     content.push({ type: 'text', text: g.prompt + '\n\nReturn only valid JSON matching this schema (use null or empty arrays for missing values):\n' + JSON.stringify(schemaStd) + docText });
     return { url: pc.base + '/messages', opts: fetchOpts_({ 'x-api-key': pc.key, 'anthropic-version': '2023-06-01' },
-      { model: model, max_tokens: g.maxTokens, system: SYS_INSTRUCTION, messages: [{ role: 'user', content: content }] }) };
+      anthropicBody_(model, g, content, opt)) };
   }
 
   if (pc.api === 'openai') {
@@ -1122,11 +1144,18 @@ function parseJsonAnswer_(text) {
 function askModel_(pc, model, g, doc, deadline, ctx) {
   const props = PropertiesService.getDocumentProperties();
   let jsonMode = pc.api === 'openai' && props.getProperty(pc.jsonProp) === 'object' ? 'object' : 'schema';
-  let shrink = 1, shrunk = false, grown = false, noTemp = false, afforded = false;
+  const thinkProp = 'THINK_' + pc.id.toUpperCase() + '_' + String(model).replace(/[^A-Za-z0-9]/g, '_');
+  const saved = (props.getProperty(thinkProp) || '').split('|');
+  const opt = {
+    noTemp: false,
+    think: pc.api === 'anthropic' ? (THINK_CHAIN.indexOf(saved[0]) >= 0 ? saved[0] : THINK_CHAIN[0]) : null,
+    noEffort: pc.api !== 'anthropic' || saved[1] === '0'
+  };
+  let shrink = 1, shrunk = false, grown = false, afforded = false;
   // Nhà cung cấp có cửa sổ ngữ cảnh nhỏ (Cloudflare 24.000 token) không cho xin nhiều token đầu ra
   let maxTok = pc.maxOut ? Math.min(g.maxTokens, pc.maxOut) : g.maxTokens;
   const gv = () => Object.assign({}, g, { maxTokens: maxTok });
-  const build = () => buildRequest_(pc, model, gv(), d, jsonMode, noTemp);
+  const build = () => buildRequest_(pc, model, gv(), d, jsonMode, opt);
   let d = docFor_(pc, doc, shrink);
   let req = build();
   const sizeOf = x => x.kind === 'text' ? x.text.length + ' ký tự' + (x.pct < 100 ? ' (' + x.pct + '% tài liệu)' : '') : Math.round(x.b64.length / 1365) / 1000 + ' MB PDF';
@@ -1151,6 +1180,7 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
         const data = parseJsonAnswer_(extractAnswer_(pc, JSON.parse(body)));
         validateBySchema_(data, g.schema, g.id);
         const out = g.check(data, ctx);
+        if (pc.api === 'anthropic') props.setProperty(thinkProp, opt.think + '|' + (opt.noEffort ? '0' : '1'));
         logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, 'OK', '');
         return { data: out, pct: d.pct || 100 };
       } catch (e) {
@@ -1169,12 +1199,32 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
 
     logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, dienGiaiCode_(code, body), body.slice(0, 500).replace(/\s+/g, ' '));
 
-    // Model bắt buộc temperature = 1 (suy luận mở rộng bật sẵn) → bỏ temperature, gọi lại
-    if (!noTemp && (code === 400 || code === 422) && /temperature/i.test(body)) {
-      noTemp = true;
+    // Model không nhận temperature → bỏ tham số đó, gọi lại
+    if (!opt.noTemp && (code === 400 || code === 422) && /temperature/i.test(body)) {
+      opt.noTemp = true;
       req = build();
       attempt--;
       continue;
+    }
+
+    // Model không nhận output_config/effort → bỏ, gọi lại
+    if (!opt.noEffort && (code === 400 || code === 422) && /output_config|effort/i.test(body)) {
+      opt.noEffort = true;
+      req = build();
+      attempt--;
+      continue;
+    }
+
+    // Model không nhận cách tắt suy nghĩ này → thử cách kế tiếp trong THINK_CHAIN
+    if (opt.think && (code === 400 || code === 422) && /thinking|between_tools|budget_tokens/i.test(body)) {
+      const nxt = THINK_CHAIN[THINK_CHAIN.indexOf(opt.think) + 1];
+      if (nxt) {
+        opt.think = nxt;
+        logNote_(g.id, pc.id, model, 'ĐỔI CÁCH TẮT SUY NGHĨ → ' + nxt, body.slice(0, 200).replace(/\s+/g, ' '));
+        req = build();
+        attempt--;
+        continue;
+      }
     }
 
     // Model không nhận json_schema → hạ xuống json_object, nhớ lại cho lượt sau
