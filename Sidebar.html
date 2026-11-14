@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --navy:#17365D; --navy2:#1f4a7a; --acc:#1a73e8; --ok:#188038; --okbg:#e6f4ea; --err:#c5221f; --errbg:#fce8e6; --warn:#b06000; --warnbg:#fef7e0; --mut:#5f6368; --bd:#dadce0; --bg:#f6f8fa; --card:#fff; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; }
+  body { font-family:"Segoe UI", Roboto, Arial, sans-serif; font-size:13px; color:#202124; background:var(--bg); display:flex; flex-direction:column; }
+  header { background:linear-gradient(135deg,var(--navy),var(--navy2)); color:#fff; padding:12px 14px; }
+  header .t { font-size:15px; font-weight:700; letter-spacing:.2px; }
+  header .s { font-size:11px; opacity:.8; margin-top:2px; }
+  nav { display:flex; background:#fff; border-bottom:1px solid var(--bd); }
+  nav button { flex:1; border:0; background:none; padding:9px 2px 7px; font-size:11.5px; cursor:pointer; color:var(--mut); border-bottom:3px solid transparent; }
+  nav button.on { color:var(--navy); border-bottom-color:var(--acc); font-weight:700; }
+  main { flex:1; overflow:auto; }
+  section { display:none; padding:12px; } section.on { display:block; }
+  h3 { font-size:12px; text-transform:uppercase; letter-spacing:.4px; margin:14px 0 6px; color:var(--mut); } h3:first-child { margin-top:0; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:8px; padding:10px; margin-bottom:10px; }
+  .row { display:flex; gap:6px; align-items:center; } .grow { flex:1; min-width:0; }
+  input[type=text], input[type=password], input[type=email], input[type=number], select { width:100%; padding:7px 8px; border:1px solid var(--bd); border-radius:6px; font-size:12px; background:#fff; }
+  input:focus, select:focus { outline:2px solid #c6dafc; border-color:var(--acc); }
+  .b { padding:7px 11px; border:1px solid var(--bd); border-radius:6px; background:#fff; cursor:pointer; font-size:12px; color:#202124; white-space:nowrap; }
+  .b:hover { background:var(--bg); } .b.p { background:var(--acc); color:#fff; border-color:var(--acc); } .b.p:hover { background:#1765cc; }
+  .b.big { width:100%; padding:12px; font-size:14px; font-weight:700; border-radius:8px; }
+  .b.s { padding:4px 8px; font-size:11px; } .b.danger { color:var(--err); } .b:disabled { opacity:.5; cursor:default; }
+  .mut { color:var(--mut); font-size:11px; line-height:1.4; }
+  .ok { color:var(--ok); } .err { color:var(--err); } .warn { color:var(--warn); }
+  .badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:10px; font-weight:600; border:1px solid var(--bd); background:var(--bg); color:var(--mut); }
+  .badge.ok { background:var(--okbg); color:var(--ok); border-color:#b7dfc0; } .badge.err { background:var(--errbg); color:var(--err); border-color:#f3b4b0; } .badge.warn { background:var(--warnbg); color:var(--warn); border-color:#f6dc9a; }
+  .msg { margin-top:8px; padding:9px 10px; border-radius:6px; background:#fff; border:1px solid var(--bd); white-space:pre-wrap; display:none; font-size:12px; line-height:1.45; }
+  .msg.show { display:block; } .msg.ok { background:var(--okbg); border-color:#b7dfc0; } .msg.err { background:var(--errbg); border-color:#f3b4b0; } .msg.warn { background:var(--warnbg); border-color:#f6dc9a; }
+  .check { display:flex; gap:8px; align-items:flex-start; padding:5px 0; border-bottom:1px dashed #eee; } .check:last-child { border-bottom:0; }
+  .check .ic { width:18px; text-align:center; flex:none; }
+  .prov { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:8px 10px; margin-bottom:8px; } .prov.off { opacity:.6; }
+  .prov .head { display:flex; align-items:center; gap:6px; }
+  .num { width:20px; height:20px; border-radius:50%; background:var(--navy); color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none; }
+  label.chk { display:flex; gap:7px; align-items:center; margin:6px 0; cursor:pointer; } label.chk input { margin:0; }
+  .lbl { font-size:11px; color:var(--mut); margin:6px 0 2px; }
+  details summary { cursor:pointer; font-size:11.5px; color:var(--acc); margin-top:6px; }
+  .log { font-size:11px; border-bottom:1px solid #eee; padding:6px 0; } .log .t { color:var(--mut); } .log b { font-weight:600; }
+  ul.files { margin:6px 0 0; padding-left:16px; font-size:11px; max-height:150px; overflow:auto; }
+  .grp { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:8px 10px; margin-bottom:6px; }
+  .grp .d { font-size:11px; color:var(--mut); margin-left:22px; }
+  .spin { display:inline-block; width:12px; height:12px; border:2px solid #ccc; border-top-color:var(--acc); border-radius:50%; animation:sp .9s linear infinite; vertical-align:-2px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  .models { max-height:160px; overflow:auto; font-size:11px; background:var(--bg); border-radius:6px; padding:6px; margin-top:6px; font-family:Consolas, monospace; }
+  .models div { cursor:pointer; padding:1px 2px; } .models div:hover { background:#dfe9f7; }
+  .toast { position:fixed; left:10px; right:10px; bottom:10px; background:#323232; color:#fff; padding:9px 12px; border-radius:6px; font-size:12px; display:none; z-index:9; }
+  .kpi { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px; }
+  .kpi div { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:8px; } .kpi b { font-size:16px; display:block; color:var(--navy); } .kpi span { font-size:10.5px; color:var(--mut); }
+</style>
+</head>
+<body>
+<header><div class="t">🚀 AI Báo Cáo PDF</div><div class="s" id="ver">Đang tải...</div></header>
+<nav>
+  <button data-tab="scan" class="on">▶️ Quét</button>
+  <button data-tab="api">🔑 API</button>
+  <button data-tab="folder">📁 Thư mục</button>
+  <button data-tab="data">🧩 Dữ liệu</button>
+  <button data-tab="sched">⏰ Lịch</button>
+  <button data-tab="log">📝 Nhật ký</button>
+</nav>
+<main>
+
+<!-- ============ QUÉT ============ -->
+<section id="scan" class="on">
+  <div class="kpi"><div><b id="kCache">–</b><span>báo cáo đã đọc (cache)</span></div><div><b id="kInd">–</b><span>chỉ số đang áp dụng</span></div></div>
+  <div class="card" id="checklist"></div>
+  <button class="b p big" id="btnScan">▶️ BẮT ĐẦU QUÉT PDF MỚI</button>
+  <div class="mut" style="margin-top:6px">Mỗi lượt đọc tối đa 3 file mới; còn file thì tự chạy tiếp sau 1 phút. File đã đọc không gọi lại API.</div>
+  <div class="msg" id="scanMsg"></div>
+
+  <h3>Kết quả</h3>
+  <div class="row" style="flex-wrap:wrap; gap:6px">
+    <button class="b" data-open="Tóm tắt báo cáo">📄 Tóm tắt</button>
+    <button class="b" data-open="Tổng hợp tuần">📈 Tổng hợp tuần</button>
+    <button class="b" data-open="Công tác chính">🏗️ Công tác</button>
+    <button class="b" data-open="Kết quả chỉ số">🔎 Chỉ số</button>
+    <button class="b" data-open="Bảng so sánh chỉ số">📊 So sánh</button>
+    <button class="b" data-open="Hạng mục - Vấn đề">📌 Hạng mục</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="b grow" id="btnRebuild">🔄 Dựng lại các tab từ cache (không gọi API)</button>
+  </div>
+</section>
+
+<!-- ============ API ============ -->
+<section id="api">
+  <div class="mut" style="margin-bottom:8px">Thứ tự ưu tiên từ trên xuống (▲▼). Nhóm nào cũng thử nhà cung cấp số 1 trước; hỏng (hết hạn mức, key sai, quá tải, quá 70 giây) thì nhảy sang số 2… Trong mỗi nhà cung cấp thử <b>model chính</b> rồi <b>model dự phòng</b>. Key lưu riêng cho tài khoản Google của bạn, không hiện lại và không ghi vào nhật ký.</div>
+  <div id="provList"></div>
+  <button class="b p" id="btnSaveProv" style="width:100%">💾 Lưu thứ tự, bật/tắt và model</button>
+  <div class="msg" id="apiMsg"></div>
+</section>
+
+<!-- ============ THƯ MỤC ============ -->
+<section id="folder">
+  <h3>Thư mục Google Drive chứa báo cáo PDF</h3>
+  <div class="card">
+    <div class="lbl">Dán link thư mục hoặc ID</div>
+    <input type="text" id="folderInput" placeholder="https://drive.google.com/drive/folders/...">
+    <div class="row" style="margin-top:6px">
+      <div class="grow"><div class="lbl">Chỉ xét file sửa trong (ngày)</div><input type="number" id="folderDays" min="1" max="3650" value="14"></div>
+      <div class="grow" style="padding-top:18px"><label class="chk"><input type="checkbox" id="folderSub"> Quét cả thư mục con</label></div>
+    </div>
+    <button class="b p" id="btnFolder" style="width:100%; margin-top:8px">✅ Xác nhận thư mục</button>
+    <div class="msg" id="folderMsg"></div>
+  </div>
+  <div class="mut">Nhận cả shortcut tới PDF do người khác chia sẻ. Ngày và kỳ báo cáo đọc từ TÊN FILE (vd <i>WR-33_2026-11-05.pdf</i> → Tuần 33, 05/11/2026), không hỏi AI.</div>
+
+  <h3>Kiểm tra đọc chữ</h3>
+  <button class="b" id="btnExtract" style="width:100%">🔍 Thử bóc chữ file PDF mới nhất</button>
+  <div class="msg" id="extractMsg"></div>
+
+  <h3>Đặt lại</h3>
+  <button class="b danger" id="btnClearCache" style="width:100%">🗑️ Xóa cache – đọc lại MỌI file (tốn API)</button>
+</section>
+
+<!-- ============ DỮ LIỆU ============ -->
+<section id="data">
+  <div class="mut" style="margin-bottom:8px">Mỗi nhóm = 1 lần gọi API cho mỗi file. Bật thêm nhóm sau, script chỉ gọi API cho nhóm còn thiếu của file đã đọc.</div>
+  <h3>Báo cáo tuần CN8-2 (VICONS)</h3>
+  <div id="grpCn82"></div>
+  <h3>Báo cáo bất kỳ</h3>
+  <div id="grpGeneric"></div>
+  <div class="row" style="margin-top:6px">
+    <button class="b" data-open="Chỉ số cần lọc">📋 Sửa danh sách chỉ số</button>
+    <button class="b p grow" id="btnSaveGroups">💾 Lưu nhóm</button>
+  </div>
+  <div class="msg" id="dataMsg"></div>
+
+  <h3>Cách đọc PDF</h3>
+  <div class="card">
+    <select id="optRead">
+      <option value="auto">Tự động: bóc chữ trước, không được thì gửi nguyên PDF (khuyên dùng)</option>
+      <option value="text">Chỉ bóc chữ (nhẹ, rẻ; PDF scan sẽ lỗi)</option>
+      <option value="pdf">Chỉ gửi nguyên PDF (cần Claude/Gemini; chậm, tốn hơn)</option>
+    </select>
+    <div class="lbl">Email nhận tóm tắt sau mỗi lượt quét (để trống = không gửi)</div>
+    <input type="email" id="optEmail" placeholder="email@congty.com">
+    <label class="chk"><input type="checkbox" id="optOnlyErr" checked> Chỉ gửi khi có lỗi</label>
+    <button class="b" id="btnSaveOpt" style="width:100%">💾 Lưu tùy chọn</button>
+  </div>
+</section>
+
+<!-- ============ LỊCH ============ -->
+<section id="sched">
+  <h3>Tự động đọc báo cáo mỗi tuần</h3>
+  <div class="card">
+    <label class="chk"><input type="checkbox" id="schOn"> <b>Bật quét tự động hằng tuần</b></label>
+    <div class="row">
+      <div class="grow"><div class="lbl">Thứ</div>
+        <select id="schDay">
+          <option value="MONDAY">Thứ Hai</option><option value="TUESDAY">Thứ Ba</option><option value="WEDNESDAY">Thứ Tư</option>
+          <option value="THURSDAY">Thứ Năm</option><option value="FRIDAY">Thứ Sáu</option><option value="SATURDAY">Thứ Bảy</option><option value="SUNDAY">Chủ Nhật</option>
+        </select></div>
+      <div style="width:100px"><div class="lbl">Giờ (VN)</div><select id="schHour"></select></div>
+    </div>
+    <button class="b p" id="btnSched" style="width:100%; margin-top:8px">💾 Lưu lịch</button>
+    <div class="msg" id="schedMsg"></div>
+  </div>
+  <div class="mut">Giờ Việt Nam. Google chạy lịch trong khoảng ±15 phút quanh giờ chọn. Lịch chạy bằng tài khoản của người bật lịch, nên người đó phải là người đã nhập API key ở tab API.</div>
+</section>
+
+<!-- ============ NHẬT KÝ ============ -->
+<section id="log">
+  <div class="row" style="margin-bottom:8px">
+    <button class="b" id="btnLogReload">🔄 Tải lại</button>
+    <button class="b" data-open="Nhật ký API">📄 Mở sheet</button>
+    <button class="b danger" id="btnLogClear">🗑️ Xóa</button>
+  </div>
+  <div class="mut" style="margin-bottom:6px">Cột "Kết luận" phân biệt: HẾT HẠN MỨC (429) ≠ QUÁ TẢI (503) ≠ KEY SAI (401) ≠ SAI TÊN MODEL (404). Lỗi "vượt thời gian thực thi" là giới hạn 6 phút của Apps Script, không liên quan hạn mức API.</div>
+  <div id="logList" class="mut">Đang tải...</div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const DAY_VN = {MONDAY:'Thứ Hai',TUESDAY:'Thứ Ba',WEDNESDAY:'Thứ Tư',THURSDAY:'Thứ Năm',FRIDAY:'Thứ Sáu',SATURDAY:'Thứ Bảy',SUNDAY:'Chủ Nhật'};
+let S = null, order = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function call(fn, args, onOk, btn, onErr) {
+  if (btn) { btn.disabled = true; btn._t = btn.innerHTML; btn.innerHTML = '<span class="spin"></span> Đang xử lý...'; }
+  const done = () => { if (btn) { btn.disabled = false; btn.innerHTML = btn._t; } };
+  google.script.run
+    .withSuccessHandler(r => { done(); onOk && onOk(r); })
+    .withFailureHandler(e => { done(); const m = e && e.message ? e.message : String(e); onErr ? onErr(m) : toast('Lỗi: ' + m); })[fn].apply(null, args || []);
+}
+function msg(id, html, cls) { const m = $(id); m.className = 'msg show ' + (cls || ''); m.innerHTML = html; }
+let toastT; function toast(t) { const el = $('toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => el.style.display = 'none', 4000); }
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section').forEach(s => s.classList.toggle('on', s.id === b.dataset.tab));
+  if (b.dataset.tab === 'log') loadLog();
+});
+document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => call('ui_openSheet', [b.dataset.open], null, b));
+for (let h = 0; h < 24; h++) $('schHour').insertAdjacentHTML('beforeend', '<option value="' + h + '">' + (h < 10 ? '0' : '') + h + ':00</option>');
+
+function load() { call('ui_getState', [], s => { S = s; order = s.providers.map(p => Object.assign({}, p)); render(); }); }
+
+function render() {
+  $('ver').textContent = 'v' + S.version + ' · ' + (S.me || '');
+  $('kCache').textContent = S.cacheCount; $('kInd').textContent = S.indicatorsCount;
+  const ready = order.filter(p => p.enabled && p.ready);
+  const gOn = S.groups.filter(g => g.enabled);
+  const items = [
+    [!!S.folder.id, 'Thư mục: ' + (S.folder.id ? '<b>' + esc(S.folder.name) + '</b> (' + S.folder.lookbackDays + ' ngày)' : 'chưa xác nhận → tab Thư mục')],
+    [ready.length > 0, 'API sẵn sàng: ' + (ready.length ? ready.map(p => esc(p.label.split(' ')[0])).join(' → ') : 'chưa có → tab API')],
+    [gOn.length > 0, 'Nhóm dữ liệu đang bật: ' + (gOn.length ? gOn.length + ' (' + gOn.map(g => esc(g.id)).join(', ') + ')' : 'chưa bật → tab Dữ liệu')],
+    [S.schedule.enabled && S.schedule.triggerActive, 'Lịch tự động: ' + (S.schedule.enabled ? DAY_VN[S.schedule.weekday] + ' ' + pad(S.schedule.hour) + ':00' + (S.schedule.triggerActive ? '' : ' <span class="err">(trigger chưa hoạt động, lưu lại lịch)</span>') : 'đang tắt')]
+  ];
+  if (gOn.some(g => g.id === 'chi_so') && !S.indicatorsCount) items.push([false, 'Nhóm "Chỉ số tự khai báo" bật nhưng chưa có chỉ số nào tick Áp dụng']);
+  $('checklist').innerHTML = items.map(i => '<div class="check"><span class="ic ' + (i[0] ? 'ok' : 'warn') + '">' + (i[0] ? '✔' : '○') + '</span><span>' + i[1] + '</span></div>').join('');
+  $('optRead').value = S.options.readMode; $('optEmail').value = S.options.notifyEmail || ''; $('optOnlyErr').checked = S.options.notifyOnlyErrors;
+  $('folderInput').value = S.folder.id || ''; $('folderSub').checked = S.folder.includeSubfolders; $('folderDays').value = S.folder.lookbackDays;
+  $('schOn').checked = S.schedule.enabled; $('schDay').value = S.schedule.weekday || 'FRIDAY'; $('schHour').value = String(S.schedule.hour == null ? 5 : S.schedule.hour);
+  renderProviders(); renderGroups();
+}
+const pad = n => (n < 10 ? '0' : '') + n;
+
+function renderProviders() {
+  $('provList').innerHTML = order.map((p, i) => `
+    <div class="prov ${p.enabled ? '' : 'off'}">
+      <div class="head">
+        <span class="num">${i + 1}</span>
+        <b class="grow">${esc(p.label)}</b>
+        <span class="badge">${p.pdf ? 'PDF + chữ' : 'chỉ chữ'}</span>
+        <span class="badge ${p.ready ? 'ok' : 'warn'}">${p.ready ? 'có key' : 'thiếu key'}</span>
+        <button class="b s" onclick="mv(${i},-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="b s" onclick="mv(${i},1)" ${i === order.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+      <label class="chk"><input type="checkbox" ${p.enabled ? 'checked' : ''} onchange="order[${i}].enabled=this.checked;renderProviders()"> Dùng trong vòng xoay</label>
+      <div class="row">
+        <div class="grow"><div class="lbl">Model chính</div><input type="text" value="${esc(p.model)}" placeholder="${esc(p.defModel)}" onchange="order[${i}].model=this.value"></div>
+        <div class="grow"><div class="lbl">Model dự phòng</div><input type="text" value="${esc(p.fallback)}" placeholder="(không)" onchange="order[${i}].fallback=this.value"></div>
+      </div>
+      <details><summary>🔑 ${p.keys.every(k => k.has) ? 'Đổi' : 'Nhập'} key · 📋 danh sách model</summary>
+        ${p.keys.map(k => `
+          <div class="lbl">${esc(k.label)} <span class="mut">(${esc(k.hint)})</span> ${k.has ? '<span class="ok">● đã lưu</span>' : ''}</div>
+          <div class="row">
+            <input type="password" class="grow" id="k_${k.prop}" placeholder="${k.has ? 'Dán key mới để thay' : 'Dán key vào đây'}" autocomplete="off">
+            <button class="b s" onclick="saveKey('${k.prop}', this)">Lưu</button>
+            ${k.has ? `<button class="b s danger" onclick="delKey('${k.prop}', this)">Xóa</button>` : ''}
+          </div>`).join('')}
+        <div class="row" style="margin-top:8px">
+          <button class="b s" onclick="listModels('${p.id}', this)" ${p.ready ? '' : 'disabled'}>📋 Model dùng được với key này</button>
+        </div>
+        <div id="m_${p.id}"></div>
+      </details>
+      <div class="row" style="margin-top:8px">
+        <button class="b s" onclick="testProv('${p.id}', this)" ${p.ready ? '' : 'disabled'}>🔌 Kiểm tra kết nối</button>
+        <span class="mut grow" id="t_${p.id}"></span>
+      </div>
+    </div>`).join('');
+}
+function mv(i, d) { const j = i + d; [order[i], order[j]] = [order[j], order[i]]; renderProviders(); }
+function provPayload() { return order.map(p => ({ id: p.id, enabled: p.enabled, model: p.model, fallback: p.fallback })); }
+function saveKey(prop, btn) {
+  const v = $('k_' + prop).value.trim();
+  if (!v) return toast('Chưa nhập key.');
+  call('ui_saveKey', [prop, v], () => { toast('Đã lưu key.'); load(); }, btn);
+}
+function delKey(prop, btn) { if (confirm('Xóa key này khỏi tài khoản của bạn?')) call('ui_deleteKey', [prop], () => { toast('Đã xóa key.'); load(); }, btn); }
+function testProv(id, btn) {
+  $('t_' + id).innerHTML = '<span class="spin"></span>';
+  call('ui_saveProviders', [provPayload()], () => call('ui_testProvider', [id], r => {
+    $('t_' + id).innerHTML = r.results.map(x => '<div class="' + (x.ok ? 'ok' : 'err') + '">' + (x.ok ? '✔' : '✖') + ' ' + esc(x.model) + ': ' + esc(x.verdict) + ' (' + x.sec + 's)</div>').join('');
+  }, btn, m => { $('t_' + id).innerHTML = '<span class="err">' + esc(m) + '</span>'; }), btn);
+}
+function listModels(id, btn) {
+  const box = $('m_' + id); box.innerHTML = '<span class="spin"></span>';
+  call('ui_saveProviders', [provPayload()], () => call('ui_listModels', [id], r => {
+    const p = order.find(x => x.id === id);
+    box.innerHTML = '<div class="mut" style="margin-top:6px">' + r.total + ' model. Model chính ' + (r.hasModel ? '<span class="ok">có trong danh sách</span>' : '<span class="err">KHÔNG thấy – chọn lại bên dưới</span>') +
+      (p.fallback ? ', dự phòng ' + (r.hasFallback ? '<span class="ok">có</span>' : '<span class="err">không thấy</span>') : '') + '. Bấm tên để điền vào Model chính.</div>' +
+      '<div class="models">' + r.models.map(m => '<div onclick="pickModel(\'' + id + '\',\'' + esc(m).replace(/'/g, "\\'") + '\')">' + esc(m) + '</div>').join('') + '</div>';
+  }, btn, m => { box.innerHTML = '<span class="err">' + esc(m) + '</span>'; }), btn);
+}
+function pickModel(id, m) { const p = order.find(x => x.id === id); p.model = m; renderProviders(); toast('Đã điền "' + m + '" vào Model chính. Nhớ bấm Lưu.'); }
+$('btnSaveProv').onclick = function () {
+  call('ui_saveProviders', [provPayload()], () => { msg('apiMsg', '✔ Đã lưu. Thứ tự: ' + order.filter(p => p.enabled).map(p => esc(p.label)).join(' → '), 'ok'); load(); }, this);
+};
+
+// ---- groups ----
+function renderGroups() {
+  const html = fam => S.groups.filter(g => g.family === fam).map(g => `
+    <div class="grp"><label class="chk"><input type="checkbox" data-g="${g.id}" ${g.enabled ? 'checked' : ''}> <b>${esc(g.label)}</b>${g.must ? ' <span class="badge warn">cần cho Tổng hợp tuần</span>' : ''}</label>
+    <div class="d">${esc(g.desc)}</div></div>`).join('');
+  $('grpCn82').innerHTML = html('cn82'); $('grpGeneric').innerHTML = html('generic');
+}
+$('btnSaveGroups').onclick = function () {
+  const map = {}; document.querySelectorAll('[data-g]').forEach(c => { map[c.dataset.g] = c.checked; });
+  call('ui_saveGroups', [map], () => { msg('dataMsg', '✔ Đã lưu nhóm dữ liệu.', 'ok'); load(); }, this);
+};
+$('btnSaveOpt').onclick = function () {
+  call('ui_saveOptions', [{ readMode: $('optRead').value, notifyEmail: $('optEmail').value, notifyOnlyErrors: $('optOnlyErr').checked }], () => { msg('dataMsg', '✔ Đã lưu tùy chọn.', 'ok'); load(); }, this, m => msg('dataMsg', esc(m), 'err'));
+};
+
+// ---- scan ----
+$('btnScan').onclick = function () {
+  msg('scanMsg', '<span class="spin"></span> Đang đọc PDF… mỗi file khoảng 30–120 giây tùy số nhóm đang bật.');
+  call('ui_runScan', [], r => {
+    let h = '<b>' + esc(r.message) + '</b>';
+    (r.files || []).forEach(f => { h += '\n' + (f.groupsFail.length ? '⚠️' : '✅') + ' ' + esc(f.name) + (f.ky ? ' [' + esc(f.ky) + ']' : '') + ' – ' + f.groupsOk.length + ' nhóm OK' + (f.groupsFail.length ? '\n   ✖ ' + f.groupsFail.map(esc).join('\n   ✖ ') : ''); });
+    if (r.used) h += '\n\nAI đã dùng: ' + esc(r.used);
+    if (r.down) h += '\nBị loại trong lượt này: ' + esc(r.down);
+    if (r.failed && r.failed.length && !(r.files || []).length) h += '\n' + r.failed.map(esc).join('\n');
+    msg('scanMsg', h, r.ok ? ((r.files || []).some(f => f.groupsFail.length) ? 'warn' : 'ok') : 'err');
+    load();
+  }, this, m => msg('scanMsg', '✖ ' + esc(m), 'err'));
+};
+$('btnRebuild').onclick = function () { call('ui_rebuild', [], r => msg('scanMsg', '✔ ' + esc(r.message), 'ok'), this); };
+
+// ---- folder ----
+$('btnFolder').onclick = function () {
+  call('ui_setFolder', [$('folderInput').value, $('folderSub').checked, $('folderDays').value], r => {
+    let h = '✔ Đã xác nhận: <b>' + esc(r.name) + '</b>\nPDF trong ' + r.lookbackDays + ' ngày: ' + r.total + ' · Chờ đọc: <b>' + r.pending + '</b>';
+    if (r.pendingNames.length) h += '<ul class="files">' + r.pendingNames.map(n => '<li>' + esc(n) + '</li>').join('') + (r.pending > r.pendingNames.length ? '<li>…</li>' : '') + '</ul>';
+    msg('folderMsg', h, 'ok'); load();
+  }, this, m => msg('folderMsg', '✖ ' + esc(m), 'err'));
+};
+$('btnExtract').onclick = function () {
+  call('ui_testExtract', [], r => {
+    msg('extractMsg', 'File: <b>' + esc(r.name) + '</b> (' + r.sizeMB + ' MB) · ' + esc(r.ky) + ' · ' + esc(r.ngay) + '\n' + (r.error ? '✖ ' + esc(r.error) + '\n' : '') +
+      'Bóc được <b>' + r.chars + '</b> ký tự có nghĩa → ' + (r.enough ? 'ĐỦ để gửi dạng chữ (nhẹ, rẻ).' : 'KHÔNG đủ, sẽ gửi nguyên PDF cho Claude/Gemini.') + '\n\n<span class="mut">' + esc(r.preview) + '</span>', r.error ? 'err' : r.enough ? 'ok' : 'warn');
+  }, this, m => msg('extractMsg', '✖ ' + esc(m), 'err'));
+};
+$('btnClearCache').onclick = function () {
+  if (confirm('Xóa cache? Lần quét sau sẽ gọi API đọc lại MỌI file trong thư mục (tốn tiền). Các tab kết quả giữ nguyên tới khi dựng lại.')) call('ui_clearCache', [], () => { toast('Đã xóa cache.'); load(); }, this);
+};
+
+// ---- schedule ----
+$('btnSched').onclick = function () {
+  call('ui_saveSchedule', [{ enabled: $('schOn').checked, weekday: $('schDay').value, hour: $('schHour').value }], s => {
+    msg('schedMsg', s.enabled ? '✔ Đã bật: mỗi ' + DAY_VN[s.weekday] + ' lúc ' + pad(s.hour) + ':00 (giờ VN).' : 'Đã tắt quét tự động.', 'ok'); load();
+  }, this, m => msg('schedMsg', '✖ ' + esc(m), 'err'));
+};
+
+// ---- log ----
+function loadLog() {
+  $('logList').innerHTML = '<span class="spin"></span>';
+  call('ui_getLog', [50], rows => {
+    if (!rows.length) { $('logList').innerHTML = 'Chưa có nhật ký.'; return; }
+    // cột: 0 Lúc,1 Mã,2 Nguồn,3 File,4 Nhóm,5 NCC,6 Model,7 Cách gửi,8 Độ lớn,9 Lần,10 HTTP,11 Giây,12 Kết luận,13 Trả về
+    $('logList').innerHTML = rows.map(r => {
+      const cls = r[12] === 'OK' ? 'ok' : /HẠN MỨC|QUÁ TẢI|HẾT GIỜ/.test(r[12]) ? 'warn' : 'err';
+      return '<div class="log"><span class="t">' + esc(r[0]) + ' · ' + esc(r[2]) + '</span><br><b class="' + cls + '">' + esc(r[12]) + '</b> · ' + esc(r[5]) + ' / ' + esc(r[6]) +
+        (r[10] ? ' · HTTP ' + esc(r[10]) : '') + (r[11] && r[11] !== '0' ? ' · ' + esc(r[11]) + 's' : '') + '<br>📄 ' + esc(r[3]) + (r[4] && r[4] !== '-' ? ' · nhóm <i>' + esc(r[4]) + '</i>' : '') + ' · ' + esc(r[7]) + ' ' + esc(r[8]) +
+        (r[13] ? '<br><span class="mut">' + esc(r[13]) + '</span>' : '') + '</div>';
+    }).join('');
+  });
+}
+$('btnLogReload').onclick = loadLog;
+$('btnLogClear').onclick = function () { if (confirm('Xóa toàn bộ nhật ký API?')) call('ui_clearLog', [], loadLog, this); };
+
+load();
+</script>
+</body>
+</html>
