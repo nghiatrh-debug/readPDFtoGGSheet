@@ -61,6 +61,19 @@ Sheet **"Chỉ số cần lọc"** có sẵn 13 chỉ số mẫu; sửa/xóa/th�
 
   Nhà cung cấp chỉ bị loại khỏi phần còn lại của lượt chạy khi lỗi thuộc về cả tài khoản, hoặc khi đã hỏng từ **2 nhóm** trở lên.
 
+### Những lỗi API đã có cách xử lý tự động
+
+| Lỗi API trả về | Xử lý |
+|---|---|
+| `` `temperature` is deprecated for this model `` (HTTP 400) | Claude không gửi `temperature`; bên khác báo lỗi này thì tự bỏ rồi gọi lại **chính model đó** |
+| `This model's maximum context length is 24000 tokens` | Chữ cắt sẵn theo cửa sổ của từng bên; Cloudflare còn bị chặn trần đầu ra 3.000 token |
+| `can only afford 1970` (HTTP 402 OpenRouter) | Hạ `max_tokens` xuống đúng mức còn đủ tiền rồi gọi lại chính model đó |
+| `Request too large ... tokens per minute` (HTTP 413) | Cắt còn 35% rồi gọi lại |
+| `does not exist or you do not have access` (HTTP 404) | Chuyển sang model dự phòng |
+| `stop_reason: max_tokens` / `finish_reason: length` | Nới hạn mức đầu ra gấp đôi, gọi lại một lần |
+| `Insufficient credits` (402), key sai (401/403), hết hạn mức ngày (429) | Bỏ qua model dự phòng, đổi nhà cung cấp |
+
+
 - **Hết token** (kết quả bị cắt giữa chừng): tự nới hạn mức đầu ra gấp đôi (tối đa 32.000) và thử lại đúng một lần trên chính model đó, rồi mới chuyển model dự phòng.
 - **Nội dung quá dài**: chữ được cắt sẵn theo cửa sổ ngữ cảnh của từng nhà cung cấp (Cloudflare 18.000, Groq 20.000, OpenRouter 240.000, Claude 320.000, Gemini 400.000 ký tự). Nếu vẫn báo quá dài thì cắt còn 35% và thử lại một lần. Cột "AI đã dùng" ghi rõ khi chỉ gửi được một phần tài liệu.
 - Model không nhận `json_schema` được tự hạ xuống `json_object` và ghi nhớ cho lượt sau.
@@ -76,5 +89,5 @@ Sheet **"Chỉ số cần lọc"** có sẵn 13 chỉ số mẫu; sửa/xóa/th�
 - API key lưu trong **User Properties** của tài khoản đang đăng nhập: không nằm trong code, không hiện lại trong giao diện, không ghi vào nhật ký (nhật ký chỉ ghi 300 ký tự đầu của lỗi API).
 - **Lịch tự động chạy bằng tài khoản của người bật lịch**, nên người đó phải là người đã nhập key.
 - Báo cáo được gửi tới các nhà cung cấp đang bật. Tài liệu nhạy cảm (công nợ, tranh chấp) → chỉ bật nhà cung cấp có cam kết không dùng dữ liệu để huấn luyện.
-- **Tên model mặc định** chưa được kiểm chứng với key của anh: Claude `claude-sonnet-5-5` / `claude-haiku-5-5`; OpenRouter `openrouter/auto` / `openai/gpt-oss-120b`; Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`; Groq `openai/gpt-oss-120b` / `llama-3.3-70b-versatile`; Gemini `gemini-2.5-flash`. Dùng nút **"Model dùng được với key này"** và **"Kiểm tra kết nối"** ở tab API để chốt tên đúng trước lần quét đầu.
+- **Tên model mặc định** chưa được kiểm chứng với key của anh: Claude `claude-sonnet-5-5` / `claude-haiku-5-5`; OpenRouter `openrouter/auto` / `openai/gpt-oss-120b`; Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`; Groq `openai/gpt-oss-120b` / `openai/gpt-oss-20b`; Gemini `gemini-3.6-flash`. Dùng nút **"Model dùng được với key này"** và **"Kiểm tra kết nối"** ở tab API để chốt tên đúng trước lần quét đầu.
 - Tham chiếu: `reference/v6_cn82_weekly_report.gs` là bản v6 gốc, giữ để đối chiếu.

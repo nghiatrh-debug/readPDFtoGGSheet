@@ -92,7 +92,7 @@ const PROVIDERS = {
   },
   cloudflare: {
     label: 'Cloudflare Workers AI', api: 'openai', pdf: false, needAccount: true,
-    tokenField: 'max_tokens', textLimit: 18000,
+    tokenField: 'max_tokens', textLimit: 16000, maxOut: 3000,
     defModel: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', defFallback: '@cf/meta/llama-4-scout-17b-16e-instruct',
     keys: [
       { prop: 'KEY_CF_ACCOUNT', label: 'Account ID', hint: 'dash.cloudflare.com → Workers & Pages' },
@@ -103,14 +103,14 @@ const PROVIDERS = {
   groq: {
     label: 'Groq', api: 'openai', pdf: false,
     base: 'https://api.groq.com/openai/v1', tokenField: 'max_completion_tokens', textLimit: 20000,
-    defModel: 'openai/gpt-oss-120b', defFallback: 'llama-3.3-70b-versatile',
+    defModel: 'openai/gpt-oss-120b', defFallback: 'openai/gpt-oss-20b',
     keys: [{ prop: 'KEY_GROQ', label: 'API key', hint: 'console.groq.com/keys' }],
     defaultEnabled: true
   },
   gemini: {
     label: 'Gemini (Google AI Studio)', api: 'gemini', pdf: true,
     tokenField: 'maxOutputTokens', textLimit: 400000,
-    defModel: 'gemini-2.5-flash', defFallback: 'gemini-2.5-flash-lite',
+    defModel: 'gemini-3.6-flash', defFallback: 'gemini-3.5-flash-lite',
     keys: [{ prop: 'KEY_GEMINI', label: 'API key', hint: 'aistudio.google.com/apikey' }],
     defaultEnabled: false
   }
@@ -695,6 +695,7 @@ function buildProviderConfig_(id) {
     keys: keys, key: keys[def.keys[def.keys.length - 1].prop],
     base: def.needAccount ? 'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent(keys.KEY_CF_ACCOUNT) + '/ai/v1' : def.base,
     textLimit: def.textLimit || LIMITS.MAX_TEXT_CHARS,
+    maxOut: def.maxOut || 0,
     model: s.model, fallback: s.fallback, jsonProp: 'JSON_MODE_' + id.toUpperCase()
   };
 }
@@ -1004,7 +1005,14 @@ function askAI_(chain, g, doc, deadline, ctx) {
 }
 
 /** Dựng request cho đúng loại API. jsonMode: 'schema' (ép schema) | 'object' (chỉ ép JSON). */
-function buildRequest_(pc, model, g, doc, jsonMode) {
+/**
+ * noTemp: bỏ hẳn tham số temperature.
+ * Các model có suy luận mở rộng bật sẵn (dòng Claude 5, một số model reasoning của
+ * OpenRouter/Groq) BẮT BUỘC temperature = 1; gửi temperature: 0 bị trả HTTP 400
+ * "`temperature` may only be set to 1 when thinking is enabled". Với Claude ta bỏ luôn;
+ * các bên khác nếu báo lỗi về temperature thì askModel_ tự bỏ rồi gọi lại.
+ */
+function buildRequest_(pc, model, g, doc, jsonMode, noTemp) {
   const docText = doc && doc.kind === 'text' ? '\n--- NỘI DUNG BÁO CÁO (chữ bóc từ PDF, bảng biểu đã bị ép thành dòng) ---\n' + doc.text : '';
   const schemaStd = toJsonSchema_(g.schema);
 
@@ -1013,18 +1021,19 @@ function buildRequest_(pc, model, g, doc, jsonMode) {
     if (doc && doc.kind === 'pdf') content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: doc.b64 } });
     content.push({ type: 'text', text: g.prompt + '\n\nReturn only valid JSON matching this schema (use null or empty arrays for missing values):\n' + JSON.stringify(schemaStd) + docText });
     return { url: pc.base + '/messages', opts: fetchOpts_({ 'x-api-key': pc.key, 'anthropic-version': '2023-06-01' },
-      { model: model, max_tokens: g.maxTokens, temperature: 0, system: SYS_INSTRUCTION, messages: [{ role: 'user', content: content }] }) };
+      { model: model, max_tokens: g.maxTokens, system: SYS_INSTRUCTION, messages: [{ role: 'user', content: content }] }) };
   }
 
   if (pc.api === 'openai') {
     let userText = g.prompt + docText;
     if (jsonMode === 'object') userText = g.prompt + '\n\nTRẢ VỀ ĐÚNG JSON theo khuôn sau, không thêm chữ nào:\n' + JSON.stringify(schemaStd) + docText;
     const body = {
-      model: model, temperature: 0,
+      model: model,
       messages: [{ role: 'system', content: SYS_INSTRUCTION }, { role: 'user', content: userText }],
       response_format: jsonMode === 'object' ? { type: 'json_object' } : { type: 'json_schema', json_schema: { name: 'bao_cao', strict: true, schema: schemaStd } }
     };
     body[pc.tokenField || 'max_tokens'] = g.maxTokens;
+    if (!noTemp) body.temperature = 0;
     const headers = { Authorization: 'Bearer ' + pc.key };
     if (pc.id === 'openrouter') headers['X-Title'] = 'AI Bao Cao PDF';
     return { url: pc.base + '/chat/completions', opts: fetchOpts_(headers, body) };
@@ -1038,7 +1047,8 @@ function buildRequest_(pc, model, g, doc, jsonMode) {
     opts: fetchOpts_({ 'x-goog-api-key': pc.key }, {
       systemInstruction: { parts: [{ text: SYS_INSTRUCTION }] },
       contents: [{ role: 'user', parts: parts }],
-      generationConfig: { temperature: 0, maxOutputTokens: g.maxTokens, responseMimeType: 'application/json', responseSchema: g.schema }
+      generationConfig: Object.assign(noTemp ? {} : { temperature: 0 },
+        { maxOutputTokens: g.maxTokens, responseMimeType: 'application/json', responseSchema: g.schema })
     })
   };
 }
@@ -1112,10 +1122,13 @@ function parseJsonAnswer_(text) {
 function askModel_(pc, model, g, doc, deadline, ctx) {
   const props = PropertiesService.getDocumentProperties();
   let jsonMode = pc.api === 'openai' && props.getProperty(pc.jsonProp) === 'object' ? 'object' : 'schema';
-  let shrink = 1, shrunk = false, grown = false, maxTok = g.maxTokens;
+  let shrink = 1, shrunk = false, grown = false, noTemp = false, afforded = false;
+  // Nhà cung cấp có cửa sổ ngữ cảnh nhỏ (Cloudflare 24.000 token) không cho xin nhiều token đầu ra
+  let maxTok = pc.maxOut ? Math.min(g.maxTokens, pc.maxOut) : g.maxTokens;
   const gv = () => Object.assign({}, g, { maxTokens: maxTok });
+  const build = () => buildRequest_(pc, model, gv(), d, jsonMode, noTemp);
   let d = docFor_(pc, doc, shrink);
-  let req = buildRequest_(pc, model, gv(), d, jsonMode);
+  let req = build();
   const sizeOf = x => x.kind === 'text' ? x.text.length + ' ký tự' + (x.pct < 100 ? ' (' + x.pct + '% tài liệu)' : '') : Math.round(x.b64.length / 1365) / 1000 + ' MB PDF';
   let wait = 5000, lastInfo = '', lastCode = 0;
 
@@ -1145,8 +1158,8 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
           e.truncated ? 'HẾT TOKEN, KẾT QUẢ BỊ CẮT' : 'HTTP 200 NHƯNG DỮ LIỆU KHÔNG DÙNG ĐƯỢC', e.message);
         // Hết token: nới hạn mức đầu ra gấp đôi rồi thử lại đúng một lần trên chính model này
         if (e.truncated && !grown) {
-          grown = true; maxTok = Math.min(maxTok * 2, 32000);
-          req = buildRequest_(pc, model, gv(), d, jsonMode);
+          grown = true; maxTok = Math.min(maxTok * 2, pc.maxOut || 32000);
+          req = build();
           attempt--;
           continue;
         }
@@ -1156,11 +1169,19 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
 
     logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, dienGiaiCode_(code, body), body.slice(0, 500).replace(/\s+/g, ' '));
 
+    // Model bắt buộc temperature = 1 (suy luận mở rộng bật sẵn) → bỏ temperature, gọi lại
+    if (!noTemp && (code === 400 || code === 422) && /temperature/i.test(body)) {
+      noTemp = true;
+      req = build();
+      attempt--;
+      continue;
+    }
+
     // Model không nhận json_schema → hạ xuống json_object, nhớ lại cho lượt sau
     if (pc.api === 'openai' && (code === 400 || code === 422) && jsonMode === 'schema' && /json_schema|response_format|schema|structured/i.test(body)) {
       props.setProperty(pc.jsonProp, 'object');
       jsonMode = 'object';
-      req = buildRequest_(pc, model, gv(), d, jsonMode);
+      req = build();
       attempt--;
       continue;
     }
@@ -1169,12 +1190,23 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
     if (!shrunk && d.kind === 'text' && (code === 400 || code === 413 || code === 422) && TOO_LONG_RE.test(body)) {
       shrunk = true; shrink = 0.35;
       d = docFor_(pc, doc, shrink);
-      req = buildRequest_(pc, model, gv(), d, jsonMode);
+      req = build();
       attempt--;
       continue;
     }
 
     lastInfo = 'HTTP ' + code + ': ' + body.slice(0, 200).replace(/\s+/g, ' ');
+    // OpenRouter còn tiền nhưng không đủ cho số token đầu ra đã xin -> hạ xuống đúng mức
+    // nó cho phép ("can only afford 1970") rồi gọi lại chính model đó.
+    const afford = code === 402 && body.match(/can only afford\s+(\d+)/i);
+    if (afford && !afforded) {
+      afforded = true;
+      maxTok = Math.max(400, parseInt(afford[1], 10));
+      req = build();
+      attempt--;
+      continue;
+    }
+
     // Hỏng ở mức TÀI KHOẢN: key sai, hết tiền, hết hạn mức ngày -> model dự phòng cũng vô ích
     if (code === 401 || code === 403 || code === 402 ||
         (code === 429 && /per day|PerDay|requests per day|quota|billing|credit|insufficient/i.test(body))) {
