@@ -78,21 +78,21 @@ const DEFAULT_SCHEDULE = { enabled: false, weekday: 'FRIDAY', hour: 5 };
 const PROVIDERS = {
   claude: {
     label: 'Claude (Anthropic)', api: 'anthropic', pdf: true,
-    base: 'https://api.anthropic.com/v1', tokenField: 'max_tokens',
+    base: 'https://api.anthropic.com/v1', tokenField: 'max_tokens', textLimit: 320000,
     defModel: 'claude-sonnet-5-5', defFallback: 'claude-haiku-5-5',
     keys: [{ prop: 'KEY_CLAUDE', label: 'API key', hint: 'console.anthropic.com/settings/keys' }],
     defaultEnabled: true
   },
   openrouter: {
     label: 'OpenRouter', api: 'openai', pdf: false,
-    base: 'https://openrouter.ai/api/v1', tokenField: 'max_tokens',
+    base: 'https://openrouter.ai/api/v1', tokenField: 'max_tokens', textLimit: 240000,
     defModel: 'openrouter/auto', defFallback: 'openai/gpt-oss-120b',
     keys: [{ prop: 'KEY_OPENROUTER', label: 'API key', hint: 'openrouter.ai/keys' }],
     defaultEnabled: true
   },
   cloudflare: {
     label: 'Cloudflare Workers AI', api: 'openai', pdf: false, needAccount: true,
-    tokenField: 'max_tokens',
+    tokenField: 'max_tokens', textLimit: 18000,
     defModel: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', defFallback: '@cf/meta/llama-4-scout-17b-16e-instruct',
     keys: [
       { prop: 'KEY_CF_ACCOUNT', label: 'Account ID', hint: 'dash.cloudflare.com → Workers & Pages' },
@@ -102,14 +102,14 @@ const PROVIDERS = {
   },
   groq: {
     label: 'Groq', api: 'openai', pdf: false,
-    base: 'https://api.groq.com/openai/v1', tokenField: 'max_completion_tokens',
+    base: 'https://api.groq.com/openai/v1', tokenField: 'max_completion_tokens', textLimit: 20000,
     defModel: 'openai/gpt-oss-120b', defFallback: 'llama-3.3-70b-versatile',
     keys: [{ prop: 'KEY_GROQ', label: 'API key', hint: 'console.groq.com/keys' }],
     defaultEnabled: true
   },
   gemini: {
     label: 'Gemini (Google AI Studio)', api: 'gemini', pdf: true,
-    tokenField: 'maxOutputTokens',
+    tokenField: 'maxOutputTokens', textLimit: 400000,
     defModel: 'gemini-2.5-flash', defFallback: 'gemini-2.5-flash-lite',
     keys: [{ prop: 'KEY_GEMINI', label: 'API key', hint: 'aistudio.google.com/apikey' }],
     defaultEnabled: false
@@ -632,7 +632,7 @@ function ui_testExtract() {
   if (!files.length) throw new Error('Không thấy PDF nào trong ' + cfg.lookbackDays + ' ngày gần nhất.');
   const f = files[0];
   let text = '', err = '';
-  try { text = extractPdfText_(f.id, f.name); } catch (e) { err = e.message; }
+  try { text = cleanText_(extractPdfText_(f.id, f.name)); } catch (e) { err = e.message; }
   const clean = text.replace(/\s/g, '');
   return { name: f.name, sizeMB: Math.round(f.sizeMB * 10) / 10, ky: f.ky, ngay: f.ngay, chars: clean.length, enough: clean.length >= LIMITS.MIN_TEXT_CHARS, error: err, preview: text.slice(0, 400) };
 }
@@ -694,6 +694,7 @@ function buildProviderConfig_(id) {
     id: id, label: def.label, api: def.api, pdf: def.pdf, tokenField: def.tokenField,
     keys: keys, key: keys[def.keys[def.keys.length - 1].prop],
     base: def.needAccount ? 'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent(keys.KEY_CF_ACCOUNT) + '/ai/v1' : def.base,
+    textLimit: def.textLimit || LIMITS.MAX_TEXT_CHARS,
     model: s.model, fallback: s.fallback, jsonProp: 'JSON_MODE_' + id.toUpperCase()
   };
 }
@@ -802,7 +803,7 @@ function runScan_(source) {
           stat.apiCalls++;
           const r = askAI_(ch.chain, resolved[g], doc, deadline, ctx);
           entry.data[g] = r.data;
-          aiUsed[r.provider + ' · ' + r.model] = true;
+          aiUsed[r.provider + ' · ' + r.model + (r.pct < 100 ? ' (chỉ đọc ' + r.pct + '% văn bản)' : '')] = true;
           fileStat.groupsOk.push(g);
         } catch (e) {
           if (e.overloaded) stat.overloaded = true;
@@ -914,7 +915,7 @@ function loadDoc_(f, cfg, chain) {
   const anyPdf = chain.some(pc => pc.pdf);
   if (cfg.readMode !== 'pdf') {
     let text = '';
-    try { text = extractPdfText_(f.id, f.name); } catch (e) { console.warn('Bóc chữ thất bại [' + f.name + ']: ' + e.message); }
+    try { text = cleanText_(extractPdfText_(f.id, f.name)); } catch (e) { console.warn('Bóc chữ thất bại [' + f.name + ']: ' + e.message); }
     if (text && text.replace(/\s/g, '').length >= LIMITS.MIN_TEXT_CHARS) {
       const cut = text.length > LIMITS.MAX_TEXT_CHARS;
       if (cut) text = text.slice(0, LIMITS.MAX_TEXT_CHARS);
@@ -976,9 +977,9 @@ function askAI_(chain, g, doc, deadline, ctx) {
     tried++;
     for (const model of models) {
       try {
-        const data = askModel_(pc, model, g, doc, budget, ctx);
+        const r = askModel_(pc, model, g, doc, budget, ctx);
         RUN.providerUse[pc.id] = (RUN.providerUse[pc.id] || 0) + 1;
-        return { data: data, provider: pc.label, model: model };
+        return { data: r.data, provider: pc.label, model: model, pct: r.pct };
       } catch (e) {
         lastErr = model + ': ' + e.message;
         if (e.overloaded) overloaded = true;
@@ -1031,6 +1032,17 @@ function buildRequest_(pc, model, g, doc, jsonMode) {
       generationConfig: { temperature: 0, maxOutputTokens: g.maxTokens, responseMimeType: 'application/json', responseSchema: g.schema }
     })
   };
+}
+
+/**
+ * Bản tài liệu vừa sức MỘT nhà cung cấp: cắt chữ theo textLimit của nhà cung cấp đó
+ * (nhân thêm shrink khi phải thử lại vì "nội dung quá dài"). PDF giữ nguyên.
+ */
+function docFor_(pc, doc, shrink) {
+  if (!doc || doc.kind !== 'text') return doc;
+  const lim = Math.max(2000, Math.floor((pc.textLimit || LIMITS.MAX_TEXT_CHARS) * (shrink || 1)));
+  if (doc.text.length <= lim) return { kind: 'text', text: doc.text, pct: 100 };
+  return { kind: 'text', text: doc.text.slice(0, lim), pct: Math.max(1, Math.round(lim / doc.text.length * 100)) };
 }
 
 function fetchOpts_(headers, body) {
@@ -1091,39 +1103,60 @@ function parseJsonAnswer_(text) {
 function askModel_(pc, model, g, doc, deadline, ctx) {
   const props = PropertiesService.getDocumentProperties();
   let jsonMode = pc.api === 'openai' && props.getProperty(pc.jsonProp) === 'object' ? 'object' : 'schema';
-  let req = buildRequest_(pc, model, g, doc, jsonMode);
-  const size = doc.kind === 'text' ? doc.text.length + ' ký tự' : Math.round(doc.b64.length / 1365) / 1000 + ' MB PDF';
+  let shrink = 1, shrunk = false;
+  let d = docFor_(pc, doc, shrink);
+  let req = buildRequest_(pc, model, g, d, jsonMode);
+  const sizeOf = x => x.kind === 'text' ? x.text.length + ' ký tự' + (x.pct < 100 ? ' (' + x.pct + '% tài liệu)' : '') : Math.round(x.b64.length / 1365) / 1000 + ' MB PDF';
   let wait = 5000, lastInfo = '', lastCode = 0;
 
   for (let attempt = 1; attempt <= LIMITS.MAX_ATTEMPTS; attempt++) {
     if (Date.now() > deadline) {
       lastInfo = 'hết thời gian dành cho nhà cung cấp này';
-      logCall_(g.id, pc.id, model, doc.kind, size, attempt, '-', 0, 'HẾT GIỜ, CHUYỂN NHÀ CUNG CẤP', '');
+      logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, '-', 0, 'HẾT GIỜ, CHUYỂN NHÀ CUNG CẤP', '');
       break;
     }
     const t0 = Date.now();
     const res = UrlFetchApp.fetch(req.url, req.opts);
     const code = res.getResponseCode();
     const body = res.getContentText();
+    const sec = (Date.now() - t0) / 1000;
     lastCode = code;
-    logCall_(g.id, pc.id, model, doc.kind, size, attempt, code, (Date.now() - t0) / 1000, dienGiaiCode_(code, body), code === 200 ? '' : body.slice(0, 300).replace(/\s+/g, ' '));
 
     if (code === 200) {
-      const data = parseJsonAnswer_(extractAnswer_(pc, JSON.parse(body)));
-      validateBySchema_(data, g.schema, g.id);
-      return g.check(data, ctx);
+      // Chỉ ghi "OK" khi dữ liệu đã qua được schema và kiểm chéo, để nhật ký không báo OK giả.
+      try {
+        const data = parseJsonAnswer_(extractAnswer_(pc, JSON.parse(body)));
+        validateBySchema_(data, g.schema, g.id);
+        const out = g.check(data, ctx);
+        logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, 'OK', '');
+        return { data: out, pct: d.pct || 100 };
+      } catch (e) {
+        logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, 'HTTP 200 NHƯNG DỮ LIỆU KHÔNG DÙNG ĐƯỢC', e.message);
+        throw e;
+      }
     }
+
+    logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, dienGiaiCode_(code, body), body.slice(0, 500).replace(/\s+/g, ' '));
 
     // Model không nhận json_schema → hạ xuống json_object, nhớ lại cho lượt sau
     if (pc.api === 'openai' && (code === 400 || code === 422) && jsonMode === 'schema' && /json_schema|response_format|schema|structured/i.test(body)) {
       props.setProperty(pc.jsonProp, 'object');
       jsonMode = 'object';
-      req = buildRequest_(pc, model, g, doc, jsonMode);
+      req = buildRequest_(pc, model, g, d, jsonMode);
       attempt--;
       continue;
     }
 
-    lastInfo = 'HTTP ' + code + ': ' + body.slice(0, 150).replace(/\s+/g, ' ');
+    // Nội dung quá dài so với model: cắt còn 35% rồi thử lại đúng một lần
+    if (!shrunk && d.kind === 'text' && (code === 400 || code === 413 || code === 422) && TOO_LONG_RE.test(body)) {
+      shrunk = true; shrink = 0.35;
+      d = docFor_(pc, doc, shrink);
+      req = buildRequest_(pc, model, g, d, jsonMode);
+      attempt--;
+      continue;
+    }
+
+    lastInfo = 'HTTP ' + code + ': ' + body.slice(0, 200).replace(/\s+/g, ' ');
     if (code === 402 || (code === 429 && /per day|PerDay|requests per day|quota|billing|credit|insufficient/i.test(body))) {
       throw loi_(dienGiaiCode_(code, body) + ' (' + lastInfo + ')', { fatal: true });
     }
@@ -1146,6 +1179,8 @@ function loi_(msg, opt) {
 }
 
 /** Dịch mã HTTP ra tiếng người: phân biệt hết hạn mức (429) với quá tải (503) và lỗi khác. */
+const TOO_LONG_RE = /too large|too long|exceeds|exceed the|payload|context length|context window|maximum context|reduce the length|prompt is too long|Request too large|string too long/i;
+
 function dienGiaiCode_(code, body) {
   body = String(body || '');
   if (code === 200) return 'OK';
@@ -1157,13 +1192,14 @@ function dienGiaiCode_(code, body) {
   }
   if (code === 402) return 'HẾT TIỀN / HẾT CREDIT';
   if (code === 413) return 'NỘI DUNG GỬI QUÁ DÀI';
+  if (code === 422) return TOO_LONG_RE.test(body) ? 'NỘI DUNG GỬI QUÁ DÀI' : 'YÊU CẦU KHÔNG HỢP LỆ';
   if (code === 503) return 'NHÀ CUNG CẤP QUÁ TẢI (không phải hạn mức)';
   if (code === 500 || code === 502 || code === 504) return 'LỖI PHÍA NHÀ CUNG CẤP';
   if (code === 404) return /decommission|deprecat|no longer available/i.test(body) ? 'MODEL ĐÃ BỊ GỠ' : 'SAI TÊN MODEL';
   if (code === 401) return 'API KEY SAI HOẶC HẾT HẠN';
   if (code === 403) return 'API KEY KHÔNG ĐỦ QUYỀN / BỊ CHẶN';
   if (code === 400) {
-    if (/too large|exceeds|payload|context length|tokens/i.test(body)) return 'NỘI DUNG GỬI QUÁ LỚN';
+    if (TOO_LONG_RE.test(body)) return 'NỘI DUNG GỬI QUÁ LỚN';
     if (/json_schema|response_format/i.test(body)) return 'MODEL KHÔNG NHẬN JSON SCHEMA';
     return 'SAI CÚ PHÁP YÊU CẦU';
   }
@@ -1573,6 +1609,33 @@ function ngayStr_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, APP.TZ, 'yyyy-MM-dd');
   return String(v || '');
 }
+/**
+ * Làm sạch chữ bóc từ PDF trước khi gửi API: bỏ ký tự điều khiển và nửa cặp surrogate
+ * (OCR đôi khi sinh ra, làm API trả 400 "invalid request"), gộp khoảng trắng thừa.
+ */
+function cleanText_(s) {
+  let t = String(s || '');
+  if (/[\uD800-\uDFFF]/.test(t)) {
+    let out = '';
+    for (let i = 0; i < t.length; i++) {
+      const c = t.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF) {
+        const n = t.charCodeAt(i + 1);
+        if (n >= 0xDC00 && n <= 0xDFFF) { out += t[i] + t[i + 1]; i++; }
+        continue;
+      }
+      if (c >= 0xDC00 && c <= 0xDFFF) continue;
+      out += t[i];
+    }
+    t = out;
+  }
+  return t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/(?:[ \t]*\n){3,}/g, '\n\n')
+    .trim();
+}
+
 function isNum_(v) { return typeof v === 'number' && isFinite(v); }
 function n_(v) { return isNum_(v) ? v : ''; }
 function round2_(v) { return Math.round(v * 100) / 100; }
