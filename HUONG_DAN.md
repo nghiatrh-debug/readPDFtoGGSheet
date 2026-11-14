@@ -49,7 +49,22 @@ Sheet **"Chỉ số cần lọc"** có sẵn 13 chỉ số mẫu; sửa/xóa/th�
 
 ## 5. Cách hệ thống hoạt động
 
-- **Vòng xoay**: nhóm nào cũng thử nhà cung cấp số 1. Hỏng vì 429 (hết hạn mức), 401/403 (key), 404 (model), 5xx (quá tải) hoặc quá 70 giây → thử model dự phòng → vẫn hỏng thì nhảy sang số 2… Nhà cung cấp hỏng bị loại khỏi phần còn lại của lượt chạy. Model không nhận `json_schema` được tự hạ xuống `json_object` và ghi nhớ.
+- **Vòng xoay** (mỗi nhóm, mỗi file):
+
+  1. **Model chính** của nhà cung cấp số 1.
+  2. Hỏng vì lỗi của riêng model đó (404 sai tên model, 400 sai cú pháp, 413 nội dung quá dài, hết token, JSON trả về hỏng, 429 theo phút, 5xx quá tải) → **thử model dự phòng** của chính nhà cung cấp đó.
+  3. Model dự phòng cũng hỏng → **nhà cung cấp số 2**, lại chạy từ bước 1.
+
+  Ngoại lệ: lỗi thuộc về cả tài khoản (401/403 key sai, 402 hết tiền, 429 hết hạn mức **ngày**) thì bỏ qua model dự phòng và nhảy nhà cung cấp luôn, vì đổi model cũng vô ích.
+
+  Mỗi model có **ngân sách 70 giây riêng**, model chính không ăn hết giờ của model dự phòng.
+
+  Nhà cung cấp chỉ bị loại khỏi phần còn lại của lượt chạy khi lỗi thuộc về cả tài khoản, hoặc khi đã hỏng từ **2 nhóm** trở lên.
+
+- **Hết token** (kết quả bị cắt giữa chừng): tự nới hạn mức đầu ra gấp đôi (tối đa 32.000) và thử lại đúng một lần trên chính model đó, rồi mới chuyển model dự phòng.
+- **Nội dung quá dài**: chữ được cắt sẵn theo cửa sổ ngữ cảnh của từng nhà cung cấp (Cloudflare 18.000, Groq 20.000, OpenRouter 240.000, Claude 320.000, Gemini 400.000 ký tự). Nếu vẫn báo quá dài thì cắt còn 35% và thử lại một lần. Cột "AI đã dùng" ghi rõ khi chỉ gửi được một phần tài liệu.
+- Model không nhận `json_schema` được tự hạ xuống `json_object` và ghi nhớ cho lượt sau.
+- **Nhật ký nói thật**: chỉ ghi `OK` sau khi dữ liệu đã qua schema và kiểm chéo. HTTP 200 mà dữ liệu hỏng ghi `HTTP 200 NHƯNG DỮ LIỆU KHÔNG DÙNG ĐƯỢC` kèm lý do; thêm các dòng `CHUYỂN SANG MODEL DỰ PHÒNG` và `CHUYỂN SANG NHÀ CUNG CẤP KẾ TIẾP` để thấy rõ đường đi.
 - **Đọc PDF**: bóc chữ bằng Drive OCR (nhẹ, rẻ). Không đủ chữ (PDF scan) → gửi nguyên file cho **Claude** hoặc **Gemini** (các bên khác chỉ nhận chữ). Có thể ép "chỉ chữ" hoặc "chỉ PDF" ở tab Dữ liệu.
 - **Cache & chống trùng**: khóa = File ID + thời điểm sửa. File bị thay bản mới → đọc lại. Các tab kết quả luôn được dựng lại từ cache, không ghi trùng. Mỗi File ID chỉ hiện phiên bản mới nhất.
 - **Giới hạn Apps Script**: mỗi lượt đọc tối đa 3 file, dừng nhận file mới sau 150 giây; còn file thì tự chạy tiếp sau 1 phút; model quá tải thì tự thử lại sau 5 phút (tối đa 4 lần).

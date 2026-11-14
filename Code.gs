@@ -442,7 +442,7 @@ const DEFAULT_INDICATORS = [
 ];
 
 // ==================== TRẠNG THÁI LƯỢT CHẠY ====================
-const RUN = { providerDown: {}, providerUse: {}, logBuf: [], curFile: '', runId: '', source: '' };
+const RUN = { providerDown: {}, providerFail: {}, providerUse: {}, logBuf: [], curFile: '', runId: '', source: '' };
 
 // ==================== MENU & SIDEBAR ====================
 function onOpen() {
@@ -752,7 +752,7 @@ function runScan_(source) {
 
   const started = Date.now();
   const deadline = started + LIMITS.HARD_LIMIT_SEC * 1000;
-  RUN.providerDown = {}; RUN.providerUse = {}; RUN.logBuf = [];
+  RUN.providerDown = {}; RUN.providerFail = {}; RUN.providerUse = {}; RUN.logBuf = [];
   RUN.runId = Utilities.formatDate(new Date(), APP.TZ, 'yyyyMMdd-HHmmss'); RUN.source = source;
   const stat = { apiCalls: 0, files: [], skipped: 0, left: 0, rows: 0, failed: [], overloaded: false };
   let cfg;
@@ -971,25 +971,34 @@ function askAI_(chain, g, doc, deadline, ctx) {
     if (doc.kind === 'pdf' && !pc.pdf) { errs.push(pc.label + ': không nhận file PDF'); continue; }
     if (Date.now() > deadline) { errs.push(pc.label + ': hết thời gian lượt chạy'); break; }
 
-    const budget = Math.min(deadline, Date.now() + LIMITS.PROVIDER_BUDGET_SEC * 1000);
     const models = [pc.model].concat(pc.fallback && pc.fallback !== pc.model ? [pc.fallback] : []);
-    let lastErr = '';
+    let lastErr = '', scope = 'model';
     tried++;
-    for (const model of models) {
+    for (let i = 0; i < models.length; i++) {
+      const model = models[i];
+      if (Date.now() > deadline) { lastErr = model + ': hết thời gian lượt chạy'; break; }
+      // Mỗi model có ngân sách thời gian RIÊNG, model chính không ăn hết giờ của model dự phòng
+      const budget = Math.min(deadline, Date.now() + LIMITS.PROVIDER_BUDGET_SEC * 1000);
       try {
         const r = askModel_(pc, model, g, doc, budget, ctx);
         RUN.providerUse[pc.id] = (RUN.providerUse[pc.id] || 0) + 1;
         return { data: r.data, provider: pc.label, model: model, pct: r.pct };
       } catch (e) {
         lastErr = model + ': ' + e.message;
+        scope = e.scope || 'model';
         if (e.overloaded) overloaded = true;
-        if (e.fatal || Date.now() > budget) break;
+        if (scope === 'provider') break;   // lỗi tài khoản: đổi model cũng vô ích
+        if (i + 1 < models.length) logNote_(g.id, pc.id, models[i + 1], 'CHUYỂN SANG MODEL DỰ PHÒNG', 'Model ' + model + ' hỏng: ' + e.message);
       }
     }
-    RUN.providerDown[pc.id] = lastErr.slice(0, 120);
+    // Chỉ loại nhà cung cấp khỏi phần còn lại của lượt chạy khi lỗi thuộc về cả tài khoản,
+    // hoặc khi nhà cung cấp đó đã hỏng từ 2 nhóm trở lên (tránh thử đi thử lại vô ích).
+    RUN.providerFail[pc.id] = (RUN.providerFail[pc.id] || 0) + 1;
+    if (scope === 'provider' || RUN.providerFail[pc.id] >= 2) RUN.providerDown[pc.id] = lastErr.slice(0, 120);
     errs.push(pc.label + ' → ' + lastErr);
+    if (chain.indexOf(pc) < chain.length - 1) logNote_(g.id, pc.id, '-', 'CHUYỂN SANG NHÀ CUNG CẤP KẾ TIẾP', lastErr);
   }
-  const err = new Error('Cả ' + tried + ' nhà cung cấp đều không trả được. ' + errs.join(' || '));
+  const err = new Error('Đã thử ' + tried + ' nhà cung cấp, không bên nào trả được. ' + errs.join(' || '));
   err.overloaded = overloaded;
   throw err;
 }
@@ -1071,21 +1080,21 @@ function toJsonSchema_(sc) {
 function extractAnswer_(pc, j) {
   if (pc.api === 'anthropic') {
     const text = (j.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('');
-    if (j.stop_reason && j.stop_reason !== 'end_turn') throw loi_(pc.label + ' dừng giữa chừng (stop_reason: ' + j.stop_reason + ').', { fatal: true });
+    if (j.stop_reason && j.stop_reason !== 'end_turn') throw loi_(pc.label + ' dừng giữa chừng (stop_reason: ' + j.stop_reason + ').', { truncated: j.stop_reason === 'max_tokens' });
     if (!text.trim()) throw loi_(pc.label + ' trả nội dung rỗng.');
     return text;
   }
   if (pc.api === 'openai') {
     const ch = (j.choices || [])[0];
     if (!ch) throw loi_(pc.label + ' không trả lựa chọn nào: ' + JSON.stringify(j).slice(0, 150));
-    if (ch.finish_reason && ch.finish_reason !== 'stop') throw loi_(pc.label + ' dừng giữa chừng (finish_reason: ' + ch.finish_reason + ').', { fatal: true });
+    if (ch.finish_reason && ch.finish_reason !== 'stop') throw loi_(pc.label + ' dừng giữa chừng (finish_reason: ' + ch.finish_reason + ').', { truncated: ch.finish_reason === 'length' });
     const text = (ch.message && ch.message.content) || '';
     if (!String(text).trim()) throw loi_(pc.label + ' trả nội dung rỗng.');
     return text;
   }
   const cand = (j.candidates || [])[0];
   if (!cand) throw loi_('Gemini không trả candidate nào' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (bị chặn: ' + j.promptFeedback.blockReason + ')' : '') + '.');
-  if (cand.finishReason && cand.finishReason !== 'STOP') throw loi_('Gemini dừng giữa chừng (finishReason: ' + cand.finishReason + ').', { fatal: true });
+  if (cand.finishReason && cand.finishReason !== 'STOP') throw loi_('Gemini dừng giữa chừng (finishReason: ' + cand.finishReason + ').', { truncated: cand.finishReason === 'MAX_TOKENS' });
   const text = ((cand.content && cand.content.parts) || []).map(p => p.text || '').join('');
   if (!text.trim()) throw loi_('Gemini trả nội dung rỗng.');
   return text;
@@ -1103,9 +1112,10 @@ function parseJsonAnswer_(text) {
 function askModel_(pc, model, g, doc, deadline, ctx) {
   const props = PropertiesService.getDocumentProperties();
   let jsonMode = pc.api === 'openai' && props.getProperty(pc.jsonProp) === 'object' ? 'object' : 'schema';
-  let shrink = 1, shrunk = false;
+  let shrink = 1, shrunk = false, grown = false, maxTok = g.maxTokens;
+  const gv = () => Object.assign({}, g, { maxTokens: maxTok });
   let d = docFor_(pc, doc, shrink);
-  let req = buildRequest_(pc, model, g, d, jsonMode);
+  let req = buildRequest_(pc, model, gv(), d, jsonMode);
   const sizeOf = x => x.kind === 'text' ? x.text.length + ' ký tự' + (x.pct < 100 ? ' (' + x.pct + '% tài liệu)' : '') : Math.round(x.b64.length / 1365) / 1000 + ' MB PDF';
   let wait = 5000, lastInfo = '', lastCode = 0;
 
@@ -1131,7 +1141,15 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
         logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, 'OK', '');
         return { data: out, pct: d.pct || 100 };
       } catch (e) {
-        logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec, 'HTTP 200 NHƯNG DỮ LIỆU KHÔNG DÙNG ĐƯỢC', e.message);
+        logCall_(g.id, pc.id, model, d.kind, sizeOf(d), attempt, code, sec,
+          e.truncated ? 'HẾT TOKEN, KẾT QUẢ BỊ CẮT' : 'HTTP 200 NHƯNG DỮ LIỆU KHÔNG DÙNG ĐƯỢC', e.message);
+        // Hết token: nới hạn mức đầu ra gấp đôi rồi thử lại đúng một lần trên chính model này
+        if (e.truncated && !grown) {
+          grown = true; maxTok = Math.min(maxTok * 2, 32000);
+          req = buildRequest_(pc, model, gv(), d, jsonMode);
+          attempt--;
+          continue;
+        }
         throw e;
       }
     }
@@ -1142,7 +1160,7 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
     if (pc.api === 'openai' && (code === 400 || code === 422) && jsonMode === 'schema' && /json_schema|response_format|schema|structured/i.test(body)) {
       props.setProperty(pc.jsonProp, 'object');
       jsonMode = 'object';
-      req = buildRequest_(pc, model, g, d, jsonMode);
+      req = buildRequest_(pc, model, gv(), d, jsonMode);
       attempt--;
       continue;
     }
@@ -1151,29 +1169,41 @@ function askModel_(pc, model, g, doc, deadline, ctx) {
     if (!shrunk && d.kind === 'text' && (code === 400 || code === 413 || code === 422) && TOO_LONG_RE.test(body)) {
       shrunk = true; shrink = 0.35;
       d = docFor_(pc, doc, shrink);
-      req = buildRequest_(pc, model, g, d, jsonMode);
+      req = buildRequest_(pc, model, gv(), d, jsonMode);
       attempt--;
       continue;
     }
 
     lastInfo = 'HTTP ' + code + ': ' + body.slice(0, 200).replace(/\s+/g, ' ');
-    if (code === 402 || (code === 429 && /per day|PerDay|requests per day|quota|billing|credit|insufficient/i.test(body))) {
-      throw loi_(dienGiaiCode_(code, body) + ' (' + lastInfo + ')', { fatal: true });
+    // Hỏng ở mức TÀI KHOẢN: key sai, hết tiền, hết hạn mức ngày -> model dự phòng cũng vô ích
+    if (code === 401 || code === 403 || code === 402 ||
+        (code === 429 && /per day|PerDay|requests per day|quota|billing|credit|insufficient/i.test(body))) {
+      throw loi_(dienGiaiCode_(code, body) + ' (' + lastInfo + ')', { scope: 'provider' });
     }
     if (code === 429 || code >= 500) {
       if (attempt < LIMITS.MAX_ATTEMPTS && Date.now() + wait < deadline) { Utilities.sleep(wait); wait *= 2; continue; }
       break;
     }
-    throw loi_(dienGiaiCode_(code, body) + ' (' + lastInfo + ')', { fatal: true });
+    // Mọi lỗi còn lại (404 sai tên model, 400 sai cú pháp, 413 quá dài...) là lỗi của
+    // riêng model này -> trả về để vòng ngoài thử MODEL DỰ PHÒNG trước khi đổi nhà cung cấp.
+    throw loi_(dienGiaiCode_(code, body) + ' (' + lastInfo + ')', { scope: 'model' });
   }
   const err = loi_(lastInfo || 'không trả được sau ' + LIMITS.MAX_ATTEMPTS + ' lần thử');
   err.overloaded = lastCode >= 500 || lastCode === 0;
   throw err;
 }
 
+/**
+ * scope 'model'    : lỗi của riêng model này (sai tên model, sai cú pháp, quá dài,
+ *                    hết token, dữ liệu trả về hỏng) -> VẪN THỬ MODEL DỰ PHÒNG.
+ * scope 'provider' : lỗi của cả tài khoản (key sai, hết tiền, hết hạn mức ngày)
+ *                    -> model dự phòng cũng vô ích, nhảy nhà cung cấp luôn.
+ */
 function loi_(msg, opt) {
   const e = new Error(msg);
-  e.fatal = !!(opt && opt.fatal);
+  e.scope = (opt && opt.scope) || 'model';
+  e.fatal = e.scope === 'provider';
+  e.truncated = !!(opt && opt.truncated);
   e.overloaded = !!(opt && opt.overloaded);
   return e;
 }
@@ -1271,6 +1301,12 @@ function logCall_(group, providerId, model, kind, size, attempt, code, sec, verd
   RUN.logBuf.push([new Date(), RUN.runId, RUN.source, RUN.curFile, group, PROVIDERS[providerId] ? PROVIDERS[providerId].label : providerId, model,
     kind === 'text' ? 'chữ' : kind === 'pdf' ? 'file PDF' : kind, size, attempt, code, Math.round((sec || 0) * 10) / 10, verdict, body]);
 }
+/** Ghi một dòng ghi chú (không phải lượt gọi API) để thấy rõ lúc nào xoay model/nhà cung cấp. */
+function logNote_(group, providerId, model, verdict, detail) {
+  RUN.logBuf.push([new Date(), RUN.runId, RUN.source, RUN.curFile, group,
+    PROVIDERS[providerId] ? PROVIDERS[providerId].label : providerId, model, '-', '-', '-', '-', '', verdict, String(detail || '').slice(0, 500)]);
+}
+
 function flushLog_() {
   if (!RUN.logBuf.length) return;
   try {
